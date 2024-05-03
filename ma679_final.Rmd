@@ -1,0 +1,156 @@
+---
+title: "ma679_final"
+author: "Jinhu Sun"
+date: "2024-04-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(data.table)
+library(dplyr)
+```
+
+```{r}
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_Hospital.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+```
+
+```{r}
+hospital2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Hospital.CSV', col.names = output)
+```
+
+
+```{r}
+# Core
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_Core.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+core2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Core.CSV', nrows = 1000000, col.names = output)
+```
+
+
+```{r}
+# Diagnosis and Procedure Groups File (DPGF)
+ 
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_DX_PR_GRPS.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+ 
+dpgf <- fread('/restricted/projectnb/ma679/Data/NRD_2018_DX_PR_GRPS.CSV', nrows = 1000000, col.names = output)
+```
+
+
+```{r}
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_Severity.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+
+severity2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Severity.CSV', nrows = 1000000, col.names = output)
+```
+
+```{r}
+# check readmission
+processed_data <- core2018 %>%
+  arrange(NRD_VisitLink, NRD_DaysToEvent) %>%
+  group_by(NRD_VisitLink) %>%
+  mutate(
+    prev_days_to_event = lag(NRD_DaysToEvent),
+    prev_length_of_stay = lag(LOS),
+    Days_Between_Admissions = NRD_DaysToEvent - prev_days_to_event - prev_length_of_stay,
+    Days_Between_Admissions = if_else(is.na(Days_Between_Admissions), 0, Days_Between_Admissions)
+  )
+```
+
+
+```{r}
+#duplicates <- processed_data %>%
+ # group_by(NRD_VisitLink) %>%     
+  #filter(n() > 1) %>%   
+  #ungroup()  
+
+#duplicates <- duplicates %>%
+  #filter(Days_Between_Admissions <= 30)
+
+############### mark non-duplicate ID as 0 and "days_between_admission" > 30 also 0 #################
+duplicates <- processed_data %>%
+  group_by(NRD_VisitLink) %>%
+  mutate(
+    admission_count = n(),  # Count the number of admissions per patient
+    readmission_mark = ifelse(admission_count == 1 | Days_Between_Admissions > 30, 0, 1)
+  ) %>%
+  ungroup()
+
+
+filtered_data123 <- duplicates %>%
+  filter(
+    rowSums(sapply(select(., I10_PR1:I10_PR25), function(x) {
+      grepl("^0B11", x) | x %in% c("0CTS0ZZ", "0CTS3ZZ", "0CTS4ZZ", "0CTS7ZZ", "0CTS8ZZ")
+    })) > 0 |
+    rowSums(sapply(select(., I10_DX1:I10_DX40), function(x) {
+      grepl("^H70", x)
+    })) > 0
+  )
+```
+
+```{r}
+selected_data <- select(filtered_data123, "NRD_VisitLink",I10_PR1:I10_PR25,I10_DX1:I10_DX40)
+```
+
+```{r}
+procedure_columns <- paste0("I10_PR", 1:25)
+
+diagnosis_columns <- paste0("I10_DX", 1:40)
+
+replace_conditions <- function(x) {
+  if_else(
+    grepl("^0B11", x) | 
+    grepl("^H70", x) | 
+    x %in% c("0CTS0ZZ", "0CTS3ZZ", "0CTS4ZZ", "0CTS7ZZ", "0CTS8ZZ"),
+    x,
+    "0" 
+  )
+}
+```
+
+```{r}
+df <- selected_data %>%
+  mutate(across(all_of(c(procedure_columns, diagnosis_columns)), replace_conditions))
+```
+
+
+```{r}
+unique_values <- df %>%
+  select(I10_DX1:I10_DX40) %>%
+  lapply(unique)
+combined_unique_values <- unlist(unique_values)
+overall_unique_values <- unique(combined_unique_values)
+unique_H70 <- overall_unique_values[2:length(overall_unique_values)]
+unique_H70
+```
+```{r}
+overall_unique_values
+```
+
+
+```{r}
+H70_data <- df[ , 1:40]
+H70_dataframe <- matrix(0, nrow = nrow(df), ncol = length(unique_H70))
+colnames(H70_dataframe) <- unique_H70
+for(i in 1:40){
+  DX_vector <- H70_data[ , i]
+  H70_dataframe_iter <- matrix(0, nrow = nrow(df), ncol = length(unique_H70))
+  for(j in 1:nrow(DX_vector)){
+      if(DX_vector[j,] %in% colnames(H70_dataframe)){
+        H70_dataframe_iter[j, which(colnames(H70_dataframe) == as.character(DX_vector[j, ]))] <- 1
+      }
+  }
+  H70_dataframe <- H70_dataframe + H70_dataframe_iter
+}
+
+```
+

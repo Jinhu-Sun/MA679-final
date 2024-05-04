@@ -1,0 +1,247 @@
+---
+title: "MA679_final"
+output: html_document
+date: "2024-04-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(data.table)
+```
+
+Data reading
+
+```{r include=FALSE}
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_Hospital.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+```
+
+```{r include=FALSE}
+hospital2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Hospital.CSV', col.names = output)
+hospital2019 <- fread('/restricted/projectnb/ma679/Data/NRD_2019_Hospital.CSV', col.names = output)
+hospital2020 <- fread('/restricted/projectnb/ma679/Data/NRD_2020_Hospital.CSV', col.names = output)
+hospital <- rbind(hospital2018, hospital2019, hospital2020)
+```
+
+
+```{r include=FALSE}
+# Core
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_Core.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+core2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Core.CSV', nrows = 1000000, col.names = output)
+```
+
+
+```{r include=FALSE}
+# Diagnosis and Procedure Groups File (DPGF)
+ 
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_DX_PR_GRPS.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+ 
+dpgf <- fread('/restricted/projectnb/ma679/Data/NRD_2018_DX_PR_GRPS.CSV', nrows = 1000000, col.names = output)
+```
+
+
+```{r include=FALSE}
+command <- "awk 'NR > 19 {print substr($0, 41, 29)}' '/restricted/projectnb/ma679/Data/FileSpecifications/FileSpecifications_NRD_2018_Severity.TXT'"
+output <- trimws(system(command, intern = TRUE))
+print(output)
+
+severity2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Severity.CSV', nrows = 1000000, col.names = output)
+```
+
+Data cleaning and visualization:
+```{r echo=FALSE, warning=FALSE}
+library(ggplot2)
+library(tidyverse)
+```
+
+```{r}
+length(unique(hospital2018$H_CONTRL))
+length(unique(hospital2019$H_CONTRL))
+length(unique(hospital2020$H_CONTRL))
+```
+
+The dataset of interest captures the total number of hospital discharges, categorized by the hospital's ownership across different years. Notably, the dataset contains information on three distinct types of hospital ownership for the years 2018 and 2019. However, for the year 2020, the data encompasses 2539 ownership categories. To facilitate analysis and visualization, we will construct a bar chart titled "Total Hospital Discharges by Ownership Over 2018 and 2019".
+
+```{r warning=FALSE}
+hospital_tidy <- hospital %>%
+  filter(YEAR != 2020) %>%
+  group_by(YEAR, H_CONTRL) %>%
+  summarize(Total_Discharge = sum(TOTAL_DISC, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+ggplot(hospital_tidy, aes(x=factor(H_CONTRL), y=Total_Discharge, fill=factor(YEAR))) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(
+    aes(label=Total_Discharge), 
+    position=position_dodge(width=0.9), 
+    vjust=-0.25,
+    size=3.5
+  ) +
+  scale_fill_brewer(palette="Set2", name="Year") +
+  xlab("Ownership of hospital") +
+  ylab("Total Discharges") +
+  ggtitle("Total Hospital Discharges by Ownership Over 2018 and 2019") +
+  theme_classic()
+```
+
+The bar chart provides the following information:
+
+1. Ownership of hospital 2 has the highest number of discharges: In both years, the bars for ownership of hospital 2 are the tallest, indicating the greatest number of discharges compared to types 1 and 3.
+
+2. Increase in discharges for Ownership of hospital 1 and 2: There is an upward trend in the number of discharges from 2018 to 2019 for ownership of hospital 1 and 2, as indicated by the increasing height of the bars from left to right for these types.
+
+3. Decrease in discharges for Ownership of hospital 3: The number of discharges for ownership of hospital 3 shows a reduction from 2018 to 2019, as the bar for 2019 is shorter than the bar for 2018.
+
+
+
+In the core dataset, our first objective is to analyze the correlation between the age of the patients and their mortality status.
+
+```{r}
+unique(core2018$DIED)
+max(unique(core2018$AGE))
+```
+In the DIED column, there have some negative number which is meaning that the patient's status is unknown or was not recorded, so we need tidy the data before visualization. 
+
+```{r}
+tidy_core2018 <- core2018 %>%
+  filter(DIED >= 0) %>%
+  group_by(AGE) %>%
+  summarize(
+    Total_Deaths = sum(DIED),
+    Total_Count = n(),
+    Death_Rate = Total_Deaths / Total_Count
+  )
+```
+
+```{r}
+ggplot(tidy_core2018, aes(x = AGE, y = Total_Deaths)) +
+  geom_bar(stat="identity", position="dodge") +
+  xlab("Patient Age") +
+  ylab("Number of Deaths") +
+  ggtitle("Distribution of Patient Deaths by Age in 2018") +
+  theme_classic()
+```
+
+The chart indicates that in 2018, mortality rates for infants, represented as age 0, are notably elevated when compared to those in the 1-25 age range. As ages increase beyond 25, there is a discernible uptick in the number of deaths that correlates with aging. Notably, there is a pronounced surge in mortality at age 90, which appears to be almost 8 times higher than at age 89, suggesting a potential data anomaly or a need for further investigation into this age-specific increase.
+
+
+So, I want to compare the relationship between death rate and age.
+
+```{r}
+ggplot(tidy_core2018, aes(x = AGE, y = Death_Rate)) +
+  geom_bar(stat="identity", position="dodge") +
+  xlab("Patient Age") +
+  ylab("Death Rate") +
+  ggtitle("Distribution of Patient Death Rate by Age in 2018") +
+  theme_classic()
+```
+
+Starting from young adulthood (after age 25), there's a general trend where the death rate gradually increases with patient age. This is in line with the general demographic trend that mortality rates tend to rise with increasing age due to a higher incidence of age-related diseases and conditions.
+
+The death rate becomes more pronounced in the higher age brackets, particularly as patients approach what looks to be the latter decades of life. There's a steep increase in death rate for the oldest age groups depicted.
+
+```{r}
+duplicates <- core2018 %>%
+  group_by(NRD_VisitLink) %>%     
+  filter(n() > 1) %>%   
+  ungroup()    
+
+tidy_core2018_0B11 <- duplicates %>%
+  filter(rowSums(sapply(select(., I10_PR1:I10_PR25), function(x) grepl("^0B11", x))) > 0)
+```
+
+```{r}
+tidy_core2018_H70 <- duplicates %>%
+  filter(rowSums(sapply(select(., I10_DX1:I10_DX40), function(x) grepl("^H70", x))) > 0)
+```
+
+```{r}
+tidy_core2018_0CTS <- duplicates %>%
+  filter(rowSums(sapply(select(., I10_PR1:I10_PR25), function(x) x %in% c("0CTS0ZZ", "0CTS3ZZ", "0CTS4ZZ", "0CTS7ZZ", "0CTS8ZZ"))) > 0)
+```
+
+```{r}
+filtered_core2018 <- duplicates %>%
+  filter(
+    rowSums(sapply(select(., I10_PR1:I10_PR25), function(x) grepl("^0B11", x))) > 0 |
+    rowSums(sapply(select(., I10_DX1:I10_DX40), function(x) grepl("^H70", x))) > 0 |
+    rowSums(sapply(select(., I10_PR1:I10_PR25), function(x) x %in% c("0CTS0ZZ", "0CTS3ZZ", "0CTS4ZZ", "0CTS7ZZ", "0CTS8ZZ"))) > 0
+  ) %>%
+  select(I10_DX1:I10_DX40, I10_PR1:I10_PR25, NRD_VisitLink)
+```
+
+
+```{r}
+filtered_core2018 <- filtered_core2018 |>
+  mutate(across(.cols = I10_DX1:I10_DX40, 
+                .fns = ~ ifelse(substr(., 1, 3) == "H70", ., "0"))) |>
+  mutate(across(.cols = I10_PR1:I10_PR25, 
+                .fns = ~ ifelse(substr(., 1, 4) == "0B11" | . %in% c("0CTS0ZZ", "0CTS3ZZ", "0CTS4ZZ", "0CTS7ZZ", "0CTS8ZZ"), ., "0")))
+```
+
+
+```{r}
+unique_values <- filtered_core2018 %>%
+  select(I10_DX1:I10_DX40) %>%
+  lapply(unique)
+combined_unique_values <- unlist(unique_values)
+overall_unique_values <- unique(combined_unique_values)
+unique_H70 <- overall_unique_values[2:length(overall_unique_values)]
+unique_H70
+```
+
+
+
+```{r}
+H70_data <- filtered_core2018[ , 1:40]
+H70_dataframe <- matrix(0, nrow = nrow(filtered_core2018), ncol = length(unique_H70))
+colnames(H70_dataframe) <- unique_H70
+for(i in 1:40){
+  DX_vector <- H70_data[ , i]
+  H70_dataframe_iter <- matrix(0, nrow = nrow(filtered_core2018), ncol = length(unique_H70))
+  for(j in 1:nrow(DX_vector)){
+      if(DX_vector[j,] %in% colnames(H70_dataframe)){
+        H70_dataframe_iter[j, which(colnames(H70_dataframe) == as.character(DX_vector[j, ]))] <- 1
+      }
+  }
+  H70_dataframe <- H70_dataframe + H70_dataframe_iter
+}
+```
+
+
+
+```{r}
+unique_PR <- filtered_core2018 %>%
+  select(I10_PR1:I10_PR25) %>%
+  lapply(unique)
+combined_unique_PR <- unlist(unique_PR)
+overall_unique_PR <- unique(combined_unique_PR)
+overall_unique_PR
+unique_PR <- overall_unique_PR[2:length(overall_unique_PR)]
+unique_PR
+```
+```{r}
+PR_data <- filtered_core2018[ , 41:65]
+PR_dataframe <- matrix(0, nrow = nrow(filtered_core2018), ncol = length(unique_PR))
+colnames(PR_dataframe) <- unique_PR
+for(i in 1:25){
+  PR_vector <- PR_data[ , i]
+  PR_dataframe_iter <- matrix(0, nrow = nrow(filtered_core2018), ncol = length(unique_PR))
+  for(j in 1:nrow(PR_vector)){
+      if(PR_vector[j,] %in% colnames(PR_dataframe)){
+        PR_dataframe_iter[j, which(colnames(PR_dataframe) == as.character(PR_vector[j, ]))] <- 1
+      }
+  }
+  PR_dataframe <- PR_dataframe + PR_dataframe_iter
+}
+```

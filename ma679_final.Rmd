@@ -55,15 +55,29 @@ severity2018 <- fread('/restricted/projectnb/ma679/Data/NRD_2018_Severity.CSV', 
 
 ```{r}
 # check readmission
+#processed_data <- core2018 %>%
+#  arrange(NRD_VisitLink, NRD_DaysToEvent) %>%
+#  group_by(NRD_VisitLink) %>%
+#  mutate(
+#    prev_days_to_event = lag(NRD_DaysToEvent),
+#    prev_length_of_stay = lag(LOS),
+#    Days_Between_Admissions = NRD_DaysToEvent - prev_days_to_event - prev_length_of_stay,
+#    Days_Between_Admissions = if_else(is.na(Days_Between_Admissions), 0, Days_Between_Admissions)
+#  )
+
+####################################################
 processed_data <- core2018 %>%
   arrange(NRD_VisitLink, NRD_DaysToEvent) %>%
   group_by(NRD_VisitLink) %>%
   mutate(
     prev_days_to_event = lag(NRD_DaysToEvent),
     prev_length_of_stay = lag(LOS),
-    Days_Between_Admissions = NRD_DaysToEvent - prev_days_to_event - prev_length_of_stay,
-    Days_Between_Admissions = if_else(is.na(Days_Between_Admissions), 0, Days_Between_Admissions)
+    Days_Between_Admissions = NRD_DaysToEvent - prev_days_to_event - prev_length_of_stay
+  ) %>%
+  mutate(
+    Days_Between_Admissions = lead(Days_Between_Admissions)  # Shift the days between admissions to the previous row
   )
+
 ```
 
 
@@ -84,6 +98,11 @@ duplicates <- processed_data %>%
     readmission_mark = ifelse(admission_count == 1 | Days_Between_Admissions > 30, 0, 1)
   ) %>%
   ungroup()
+
+duplicates <- duplicates %>%
+  mutate(
+    readmission_mark = if_else(is.na(readmission_mark), 0, readmission_mark)
+  )
 
 
 filtered_data123 <- duplicates %>%

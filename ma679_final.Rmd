@@ -117,7 +117,7 @@ filtered_data123 <- duplicates %>%
 ```
 
 ```{r}
-selected_data <- select(filtered_data123, "NRD_VisitLink",I10_PR1:I10_PR25,I10_DX1:I10_DX40)
+selected_data <- select(filtered_data123, "NRD_VisitLink",I10_PR1:I10_PR25,I10_DX1:I10_DX40,admission_count,readmission_mark,NRD_VisitLink)
 ```
 
 ```{r}
@@ -170,6 +170,40 @@ for(i in 1:40){
   }
   H70_dataframe <- H70_dataframe + H70_dataframe_iter
 }
+```
 
+```{r}
+unique_PR <- df %>%
+  select(I10_PR1:I10_PR25) %>%
+  lapply(unique)
+combined_unique_PR <- unlist(unique_PR)
+overall_unique_PR <- unique(combined_unique_PR)
+overall_unique_PR
+unique_PR <- overall_unique_PR[2:length(overall_unique_PR)]
+unique_PR
+```
+
+```{r}
+PR_data <- df[ , 41:65]
+PR_dataframe <- matrix(0, nrow = nrow(df), ncol = length(unique_PR))
+colnames(PR_dataframe) <- unique_PR
+for(i in 1:25){
+  PR_vector <- PR_data[ , i]
+  PR_dataframe_iter <- matrix(0, nrow = nrow(df), ncol = length(unique_PR))
+  for(j in 1:nrow(PR_vector)){
+      if(PR_vector[j,] %in% colnames(PR_dataframe)){
+        PR_dataframe_iter[j, which(colnames(PR_dataframe) == as.character(PR_vector[j, ]))] <- 1
+      }
+  }
+  PR_dataframe <- PR_dataframe + PR_dataframe_iter
+}
+```
+
+```{r}
+total <- merge(df, H70_dataframe, all = TRUE)
+dx_cols <- paste0("I10_DX", 1:40)
+pr_cols <- paste0("I10_PR", 1:25)
+total <- total %>% select(-all_of(c(dx_cols, pr_cols)))
+total <- merge(total, PR_dataframe)
 ```
 

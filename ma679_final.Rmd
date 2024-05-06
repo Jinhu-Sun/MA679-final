@@ -117,7 +117,7 @@ filtered_data123 <- duplicates %>%
 ```
 
 ```{r}
-selected_data <- select(filtered_data123, "NRD_VisitLink",I10_PR1:I10_PR25,I10_DX1:I10_DX40,admission_count,readmission_mark,NRD_VisitLink)
+selected_data <- select(filtered_data123, "NRD_VisitLink",I10_PR1:I10_PR25,I10_DX1:I10_DX40,AGE,readmission_mark,NRD_VisitLink,FEMALE,LOS)
 ```
 
 ```{r}
@@ -157,7 +157,7 @@ overall_unique_values
 
 
 ```{r}
-H70_data <- df[ , 1:40]
+H70_data <- df[ , 27:66]
 H70_dataframe <- matrix(0, nrow = nrow(df), ncol = length(unique_H70))
 colnames(H70_dataframe) <- unique_H70
 for(i in 1:40){
@@ -184,7 +184,7 @@ unique_PR
 ```
 
 ```{r}
-PR_data <- df[ , 41:65]
+PR_data <- df[ , 2:26]
 PR_dataframe <- matrix(0, nrow = nrow(df), ncol = length(unique_PR))
 colnames(PR_dataframe) <- unique_PR
 for(i in 1:25){
@@ -200,10 +200,150 @@ for(i in 1:25){
 ```
 
 ```{r}
-total <- merge(df, H70_dataframe, all = TRUE)
+total <- cbind(df, H70_dataframe)
 dx_cols <- paste0("I10_DX", 1:40)
 pr_cols <- paste0("I10_PR", 1:25)
 total <- total %>% select(-all_of(c(dx_cols, pr_cols)))
-total <- merge(total, PR_dataframe)
+total <- cbind(total, PR_dataframe)
+
+total <- total %>%
+  rename(
+    B110F4 = `0B110F4`,
+    B113F4 = `0B113F4`,
+    B110Z4 = `0B110Z4`,
+    CTS0ZZ = `0CTS0ZZ`,
+    B114F4 = `0B114F4`,
+    B113Z4 = `0B113Z4`,
+    B110D6 = `0B110D6`
+  )
+```
+
+##########################Modeling starts here#############################################
+
+```{r}
+library(caret)
+library(ROSE)
+library(randomForest)
+library(pROC)
+library(lme4)
+library(vcd)
+library(Hmisc)
+```
+
+```{r}
+total <- total %>%
+  mutate(across(6:ncol(total), factor))
+
+total$AGE <- scale(total$AGE)
+total$LOS <- scale(total$LOS)
+total$readmission_mark <- as.factor(total$readmission_mark)
+total$FEMALE <- as.factor(total$FEMALE)
+```
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(total$readmission_mark, p = 0.75, list = FALSE)
+trainData <- total[trainIndex,]
+testData <- total[-trainIndex,]
+```
+
+###################################################################################################
+
+```{r}
+
+```
+
+```{r}
+train_control <- trainControl(
+  method = "cv",         # cross-validation
+  number = 10,           # number of folds
+  verboseIter = TRUE,    # print training iterations
+  savePredictions = "final"  # save predictions for each fold
+)
+
+```
+
+```{r}
+# Define the tuning grid correctly with 'alpha' and 'lambda'
+tune_grid <- expand.grid(
+  alpha = c(0.0001, 0.001, 0.01, 0.1, 1),  # Elastic-net mixing parameter
+  lambda = c(1e-4, 1e-3, 1e-2, 1e-1, 1)   # Regularization parameter
+)
+
+```
+
+```{r}
+set.seed(123)  # for reproducibility
+model <- train(
+  readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6,         # formula
+  data = trainData,       
+  method = "glmnet",    
+  trControl = train_control,
+  tuneGrid = tune_grid,     # hyperparameter grid
+  metric = "Accuracy"       # performance metric
+)
+```
+
+```{r}
+# Print the best model's details
+print(model)
+
+# Make predictions on new data
+predictions <- predict(model, newdata = testData)
+
+# Evaluate the model
+confusionMatrix(predictions, testData$readmission)
+```
+
+##############################OLD VERSION###########################################################
+```{r}
+table(trainData$readmission_mark)
+```
+
+```{r}
+# Applying SMOTE for imbalanced data handling
+trainDataBalanced <- ovun.sample(readmission_mark ~ AGE+FEMALE+LOS+H7091+H7011+H70002+H70001+H7012+H7092+H70009+H70091+H7093+H70003+H70891+H70092+H7090+H7013+H70221+H70892+H70201+H7010+H70093+H70209+H70899+H70012+H70893+H70212+H70222+B110F4+B113F4+B110Z4+CTS0ZZ+B114F4+B113Z4+B110D6, data = trainData, method = "over", N = 20000)$data
+```
+
+```{r}
+# Checking the levels of each categorical variable
+sapply(trainDataBalanced[, 1:ncol(trainDataBalanced)], function(x) {
+  list(levels = levels(x), nlevels = length(levels(x)))
+})
+
+logiModel <- glm(readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6, data = trainDataBalanced, family = binomial())
+```
+
+```{r}
+rfModel <- randomForest(readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70212 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6, data = trainDataBalanced)
+```
+
+```{r}
+evaluate_performance <- function(model, testData) {
+
+  predProb <- predict(model, newdata = testData, type = "response")
+  predClass <- ifelse(predProb > 0.5, "1", "0")
+  
+  rocCurve <- roc(testData$readmission, as.numeric(predProb))
+  auc <- auc(rocCurve)
+  
+  cm <- confusionMatrix(as.factor(predClass), testData$readmission)
+  
+  list(auc = auc, confusionMatrix = cm)
+}
+
+
+logitEval <- evaluate_performance(logiModel, testData)
+print(logitEval)
+```
+
+```{r}
+predicted_probs <- predict(rfModel, newdata = testData, type = "response")
+predicted_probs <- as.numeric(as.character(predicted_probs))
+
+predicted_classes <- ifelse(predicted_probs > 0.5, 1, 0)  # Assuming binary classification
+accuracy <- mean(predicted_classes == testData$readmission_mark)
+
+print(accuracy)
 ```
 

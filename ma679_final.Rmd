@@ -10,8 +10,10 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+library(reticulate)
 library(data.table)
 library(dplyr)
+library(tidyr)
 ```
 
 ```{r}
@@ -250,13 +252,14 @@ testData <- total[-trainIndex,]
 ###################################################################################################
 
 ```{r}
-
+# Applying SMOTE for imbalanced data handling
+trainDataBalanced <- ovun.sample(readmission_mark ~ AGE+FEMALE+LOS+H7091+H7011+H70002+H70001+H7012+H7092+H70009+H70091+H7093+H70003+H70891+H70092+H7090+H7013+H70221+H70892+H70201+H7010+H70093+H70209+H70899+H70012+H70893+H70212+H70222+B110F4+B113F4+B110Z4+CTS0ZZ+B114F4+B113Z4+B110D6, data = trainData, method = "over", N = 20000)$data
 ```
 
 ```{r}
 train_control <- trainControl(
   method = "cv",         # cross-validation
-  number = 10,           # number of folds
+  number = 20,           # number of folds
   verboseIter = TRUE,    # print training iterations
   savePredictions = "final"  # save predictions for each fold
 )
@@ -273,10 +276,10 @@ tune_grid <- expand.grid(
 ```
 
 ```{r}
-set.seed(123)  # for reproducibility
+set.seed(123)
 model <- train(
-  readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6,         # formula
-  data = trainData,       
+  readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6 + CTS0ZZ,         # formula
+  data = trainDataBalanced,       
   method = "glmnet",    
   trControl = train_control,
   tuneGrid = tune_grid,     # hyperparameter grid
@@ -295,15 +298,12 @@ predictions <- predict(model, newdata = testData)
 confusionMatrix(predictions, testData$readmission)
 ```
 
+
 ##############################OLD VERSION###########################################################
 ```{r}
 table(trainData$readmission_mark)
 ```
 
-```{r}
-# Applying SMOTE for imbalanced data handling
-trainDataBalanced <- ovun.sample(readmission_mark ~ AGE+FEMALE+LOS+H7091+H7011+H70002+H70001+H7012+H7092+H70009+H70091+H7093+H70003+H70891+H70092+H7090+H7013+H70221+H70892+H70201+H7010+H70093+H70209+H70899+H70012+H70893+H70212+H70222+B110F4+B113F4+B110Z4+CTS0ZZ+B114F4+B113Z4+B110D6, data = trainData, method = "over", N = 20000)$data
-```
 
 ```{r}
 # Checking the levels of each categorical variable
@@ -346,4 +346,86 @@ accuracy <- mean(predicted_classes == testData$readmission_mark)
 
 print(accuracy)
 ```
+
+
+#################################################Embedding###########################################################
+
+```{r}
+#library(reticulate)
+#reticulate::install_python(version = '<version>')
+py_run_string("print('Hello from Python')")
+```
+
+```{r}
+py_config()
+#py_install("tensorflow")
+
+```
+```{r}
+X <- select(total, -readmission_mark)
+y <- total$readmission_mark
+```
+
+```{r}
+library(recipes)
+library(rsample)
+
+recipe_obj <- recipe(readmission_mark ~ AGE+FEMALE+H7091+H7011+H70002+H70001+H7012+H7092+H70009+H70091+H7093+H70003+H70891+H70092+H7090+H7013+H70221+H70892+H70201+H7010+H70093+H70209+H70899+H70012+H70893+H70212+H70222+B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6, data = total) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  prep(training = total, retain = TRUE)
+```
+
+```{r}
+X_encoded <- bake(recipe_obj, new_data = NULL)
+```
+
+```{r}
+set.seed(123)  # for reproducibility
+split <- initial_split(X_encoded, prop = 0.75)
+train_data <- training(split)
+test_data <- testing(split)
+```
+
+```{r}
+library(keras3)
+```
+
+```{r}
+train_features <- as.matrix(train_data %>% select(-readmission_mark))
+train_target <- train_data$readmission_mark
+```
+
+```{r}
+num_features <- ncol(train_data %>% select(-readmission_mark))
+print(num_features)
+```
+
+```{r}
+# Resetting the Keras session might help in some cases
+k_clear_session()
+
+model <- keras_model_sequential() %>%
+  layer_dense(units = 16, activation = 'relu', input_shape = c(num_features)) %>%
+  layer_dense(units = 1)  # output layer for regression
+
+model %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = 'adam',
+  metrics = c('accuracy')
+)
+
+# Convert training data to matrix format
+train_features <- as.matrix(train_data %>% select(-readmission_mark))
+train_target <- train_data$readmission_mark
+
+# Fit the model
+history <- model %>% fit(
+  x = train_features, 
+  y = train_target,
+  epochs = 100,
+  batch_size = 32,
+  validation_split = 0.2
+)
+```
+
 

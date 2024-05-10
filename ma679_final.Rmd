@@ -8,6 +8,24 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+## Introduction:
+
+Hospital readmissions, defined as a patient's return to a healthcare facility within 30 days after discharge, represent a significant challenge in healthcare management, impacting both patient outcomes and healthcare costs. Understanding the factors that contribute to these readmissions is crucial for developing strategies to reduce their occurrence and improve the quality of care.
+
+This project aims to investigate the relationship between hospital readmissions and key factors such as age, gender, and specific diseases and so on. Age and gender have been recognized in previous studies as influential variables that may affect the likelihood of readmission due to varying health conditions and physiological differences. By analyzing how these demographic factors influence readmission rates, this study seeks to identify patterns that could help healthcare providers tailor post-discharge plans more effectively.
+
+Moreover, the study will delve into the impact of specific diseases classified under standardized codes begin with H70, 0B11 and 0CTS. By focusing on these conditions, we aim to understand the unique challenges associated with each and their contribution to readmission risk. Identifying the relationship between these diseases and readmission can inform specialized care strategies and lead to improved patient outcomes.
+
+Through comprehensive data analysis, this project will yield insights into the factors influencing readmission rates, enabling healthcare providers to devise effective interventions and personalized care approaches to minimize unnecessary hospital readmissions. Ultimately, the goal is to enhance patient care, optimize resource utilization, and improve overall healthcare delivery.
+
+
+## Data cleaning
+
+The initial step in our project involves thorough data cleaning and preparation, utilizing the NRD_2018_Core dataset. This dataset contains essential information, including patient age, gender, ICD-10-CM and ICD-10-PCS diagnosis codes, NRD visit links, and more.
+
+Our primary objective is to identify patients who have been hospitalized more than once. Only those who have returned to the hospital can potentially be considered for readmission. To ascertain readmission status, we employ the formula: NRD_DaysToEvents(up to date) - NRD_DaysToEvents(previous) - Length of Stay (LOS). Here, NRD_DaysToEvents represents the timing interval used to determine the days between discharges and subsequent admissions. If this calculated interval is 30 days or fewer, the readmission_mark variable is set to 1; otherwise, it is set to 0.
+
+Following the determination of potential readmissions, we focus on extracting data pertaining to specific diseases of interest, identified by standardized codes. These include diseases beginning with "H70" in the ICD-10 DX1 to DX40 columns, and those beginning with "0B11" and "0CTS" in the ICD-10 PR1 to PR25 columns. However, since the dataset labels diseases using full codes such as H7011, we need to modify our approach. To accommodate this, we convert the dataset such that it includes a binary matrix. In this matrix, column names correspond to these standardized codes, and cell values are either 0 or 1—indicating the absence or presence of a particular disease in each patient, respectively. This transformation simplifies the analysis and allows us to directly correlate specific diseases with readmission rates.
 
 ```{r}
 library(reticulate)
@@ -222,6 +240,13 @@ total <- total %>%
 
 ##########################Modeling starts here#############################################
 
+## Logistic regression with elastic-net regularization
+
+The focus is on understand the factors contributing to hospital readmissions. Demographic factors like age and gender, as well as specific diseases, are being used to identify patterns. As it is a classification problem, the first thing that comes in mind is the logistic regression.
+
+First we did a data transformation, key transformations involved converting selected columns to factors to ensure correct data handling during modeling. Continuous variables like age and length of stay (LOS) were scaled to normalize their values. The use of factors and scaling aids in effectively interpreting these variables in the predictive modeling process. And then we split the data into 75% training data and 25% testing data.
+
+
 ```{r}
 library(caret)
 library(ROSE)
@@ -249,19 +274,31 @@ trainData <- total[trainIndex,]
 testData <- total[-trainIndex,]
 ```
 
-###################################################################################################
+```{r}
+table(trainData$readmission_mark)
+```
+
+### Handling Imbalanced Data
+
+Here we can see that our data is extremely imbalanced 2247 non-readmission and 257 readmission. As we did not realized in the first time, we ran an logistic regression directly on the imbalanced data. The result was surprisingly good, with an accuracy of 0.898. However, this result is misleading due to the fact that our model basically never predict readmission patient in the result and the testing data also contains much more non-readmission patient than readmission patients.
+
+Synthetic Minority Over-sampling Technique (SMOTE) was applied to balance the dataset, with this methodology we can get equal representation of outcomes. This technique synthetically generates new instances of the minority class using existing instances. It was achieved by over sampling, the output is stored in "trainDataBalanced", which will now have an equal or nearly equal number of instances for both classes of the readmission_mark (readmitted and not readmitted), totaling up to 20,000 instances as specified.
 
 ```{r}
 # Applying SMOTE for imbalanced data handling
 trainDataBalanced <- ovun.sample(readmission_mark ~ AGE+FEMALE+LOS+H7091+H7011+H70002+H70001+H7012+H7092+H70009+H70091+H7093+H70003+H70891+H70092+H7090+H7013+H70221+H70892+H70201+H7010+H70093+H70209+H70899+H70012+H70893+H70212+H70222+B110F4+B113F4+B110Z4+CTS0ZZ+B114F4+B113Z4+B110D6, data = trainData, method = "over", N = 20000)$data
 ```
 
+### Modeling
+
+Like I said before, a logistic regression model with elastic-net regularization was chosen due to its capability to handle both l1 (lasso) and l2 (ridge) penalties, useful in feature selection and regularization to prevent over fitting. The model was trained using a cross-validation approach with 20 folds to ensure that the model generalizes well on unseen data. 
+
 ```{r}
 train_control <- trainControl(
-  method = "cv",         # cross-validation
-  number = 20,           # number of folds
-  verboseIter = TRUE,    # print training iterations
-  savePredictions = "final"  # save predictions for each fold
+  method = "cv",    
+  number = 20,           
+  verboseIter = TRUE, 
+  savePredictions = "final" 
 )
 
 ```
@@ -278,12 +315,12 @@ tune_grid <- expand.grid(
 ```{r}
 set.seed(123)
 model <- train(
-  readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6 + CTS0ZZ,         # formula
+  readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6 + CTS0ZZ,
   data = trainDataBalanced,       
   method = "glmnet",    
   trControl = train_control,
-  tuneGrid = tune_grid,     # hyperparameter grid
-  metric = "Accuracy"       # performance metric
+  tuneGrid = tune_grid,   
+  metric = "Accuracy"   
 )
 ```
 
@@ -291,66 +328,21 @@ model <- train(
 # Print the best model's details
 print(model)
 
-# Make predictions on new data
 predictions <- predict(model, newdata = testData)
-
-# Evaluate the model
 confusionMatrix(predictions, testData$readmission)
 ```
+### Model Evaluation
+
+The model's performance was evaluated using a confusion matrix. The final model selected had an alpha of 1e-04 and lambda of 0.1 based on its performance metrics. Although the sensitivity was extremely low, indicating poor performance in correctly identifying positive cases (readmissions), the specificity was perfect, meaning all non-readmission cases were identified correctly.
 
 
-##############################OLD VERSION###########################################################
-```{r}
-table(trainData$readmission_mark)
-```
+## Predictive Modeling Using Neural Networks
 
+Using a deep learning model created with "Keras", for predicting hospital readmissions offers several advantages that align well with the objectives. First, deep learning Handles Complexity. The complexity of healthcare data, which includes a variety of predictors ranging from demographic variables to detailed medical codes, requires a model capable of capturing intricate patterns and interactions among variables. Neural networks are well-suited for this task due to their ability to learn non-linear relationships and interactions between features. Also, The problem in our hand is a binary classification (readmitted/not readmitted within 30 days), and neural networks can be effectively tuned for such outcomes, particularly through the use of appropriate loss functions like binary_crossentropy and activation functions like the sigmoid in the output layer.
 
-```{r}
-# Checking the levels of each categorical variable
-sapply(trainDataBalanced[, 1:ncol(trainDataBalanced)], function(x) {
-  list(levels = levels(x), nlevels = length(levels(x)))
-})
-
-logiModel <- glm(readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6, data = trainDataBalanced, family = binomial())
-```
 
 ```{r}
-rfModel <- randomForest(readmission_mark ~ AGE + FEMALE + LOS + H7091 + H7011 + H70002 + H70001 + H7012 + H7092 + H70009 + H70091 + H7093 + H70003 + H70891 + H70092 + H7090 + H7013 + H70221 + H70892 + H70201 + H7010 + H70093 + H70209 + H70899 + H70012 + H70893 + H70212 + H70222 + B110F4 + B113F4 + B110Z4 + B114F4 + B113Z4 + B110D6, data = trainDataBalanced)
-```
-
-```{r}
-evaluate_performance <- function(model, testData) {
-
-  predProb <- predict(model, newdata = testData, type = "response")
-  predClass <- ifelse(predProb > 0.5, "1", "0")
-  
-  rocCurve <- roc(testData$readmission, as.numeric(predProb))
-  auc <- auc(rocCurve)
-  
-  cm <- confusionMatrix(as.factor(predClass), testData$readmission)
-  
-  list(auc = auc, confusionMatrix = cm)
-}
-
-
-logitEval <- evaluate_performance(logiModel, testData)
-print(logitEval)
-```
-
-```{r}
-predicted_probs <- predict(rfModel, newdata = testData, type = "response")
-predicted_probs <- as.numeric(as.character(predicted_probs))
-
-predicted_classes <- ifelse(predicted_probs > 0.5, 1, 0)  # Assuming binary classification
-accuracy <- mean(predicted_classes == testData$readmission_mark)
-
-print(accuracy)
-```
-
-
-#################################################Embedding###########################################################
-
-```{r}
+#Test my python enviroment
 #library(reticulate)
 #reticulate::install_python(version = '<version>')
 py_run_string("print('Hello from Python')")
@@ -365,6 +357,10 @@ py_config()
 X <- select(total, -readmission_mark)
 y <- total$readmission_mark
 ```
+
+### Data Preparation
+
+We use the recipe() function to defines the outcome variable (readmission_mark) and the predictor variables (like AGE, FEMALE, various disease codes). Then step_dummy function is used to automatically convert all nominal (categorical) variables into dummy/indicator variables, except for the outcome variable. This transformation is crucial for models that only accept numerical input. And finally, the data was split into 75% training and 25% testing data. And we also applied SMOTE for imbalanced data handling.
 
 ```{r}
 library(recipes)
@@ -384,7 +380,21 @@ set.seed(123)  # for reproducibility
 split <- initial_split(X_encoded, prop = 0.75)
 train_data <- training(split)
 test_data <- testing(split)
+
+#Applying SMOTE for imbalanced data handling
+train_data <- ovun.sample(readmission_mark ~ ., data = train_data, method = "over", N = 20000)$data
 ```
+
+
+### Model Architecture
+
+First dense layer is the input layer of the model, consisting of 16 units (neurons) and using the ReLU (Rectified Linear Unit) activation function. According to my search ReLU is a popular choice for hidden layers because it introduces non-linearity to the model, allowing the model to learn more complex patterns in the data. 
+
+Second dense layer is the output layer, with just one unit. Since our task is binary classification, a single unit is sufficient. The activation function for this layer is sigmoid for binary classification to output probabilities between 0 and 1.
+
+The model compilation in our code involves configuring the neural network for training, specifying how it learns and how its performance should be measured. By compiling the model with these settings our neural network to minimize the binary crossentropy during training, adjust its weights using the Adam optimization algorithm, and evaluate its success based on the accuracy metric.
+
+We set the number of times the model will work through the entire training dataset to 100 and batch_size (The number of samples per gradient update for training) to 32.
 
 ```{r}
 library(keras3)
@@ -402,11 +412,11 @@ print(num_features)
 
 ```{r}
 # Resetting the Keras session might help in some cases
-k_clear_session()
+# k_clear_session()
 
 model <- keras_model_sequential() %>%
   layer_dense(units = 16, activation = 'relu', input_shape = c(num_features)) %>%
-  layer_dense(units = 1)  # output layer for regression
+  layer_dense(units = 1, activation = 'sigmoid')  
 
 model %>% compile(
   loss = 'binary_crossentropy',
@@ -424,8 +434,42 @@ history <- model %>% fit(
   y = train_target,
   epochs = 100,
   batch_size = 32,
-  validation_split = 0.2
+  validation_split = 0.25
 )
 ```
 
+### Result for Modeling
 
+The training accuracy is relatively stable, indicating that the model is consistently learning or has reached a stable state of understanding the training data. However, the validation accuracy remains constant, suggesting that the model is not improving its performance on unseen data as training progresses. This could be a sign of overfitting, where the model performs well on the training data but fails to generalize well to new, unseen data.
+
+And the bottom Graph shows the training loss and validation loss over the same number of epochs. The training loss decreases and then stabilizes, which is typical as a model learns from the training data. The validation loss, however, is quite noisy, indicating variability in how well the model's predictions match the actual outputs of the validation data across epochs.
+
+```{r}
+test_features <- as.matrix(test_data %>% select(-readmission_mark))
+test_target <- test_data$readmission_mark
+
+evaluation <- model %>% evaluate(
+  x = test_features,
+  y = test_target,
+  verbose = 1
+)
+
+# Print out the loss and accuracy
+print(paste("Loss:", evaluation$loss))
+print(paste("Accuracy:", evaluation$acc))
+
+# Making predictions
+predictions <- model %>% predict(test_features)
+predicted_classes <- ifelse(predictions > 0.5, 1, 0)
+
+confusionMatrix(as.factor(predicted_classes), as.factor(test_target))
+
+```
+### Result for Testing
+
+The accuracy is very low (around 16.89%), and the loss is relatively high. This indicates that the model is not fitting or generalizing well to the test data. Also, a high false negative rate is observed. The model is heavily biased towards predicting the majority class (0), as seen from the specificity and negative predictive value.
+
+
+### Conclution
+
+Since both of our are in the 10% to 15% accuracy range, it suggesting that the current model configuration, including the neural network architecture and the data handling (SMOTE), is inadequate for the task. It does not capture the complexities or the patterns in the dataset necessary to accurately predict readmissions. Also despite efforts to balance the dataset using SMOTE, the model's ability to predict the minority class is significantly lacking. This is a sign which suggesting the need for revisiting the approach to handling imbalanced data.

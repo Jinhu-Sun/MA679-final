@@ -437,12 +437,31 @@ history <- model %>% fit(
   validation_split = 0.25
 )
 ```
+```{r}
+# Convert history to a dataframe
+history_df <- as.data.frame(history$metrics)
+
+# Add epoch column
+history_df$epoch <- seq_len(nrow(history_df))
+
+# Gather into long format for ggplot2
+long_history <- pivot_longer(history_df, cols = -epoch, names_to = "metric", values_to = "value")
+
+# Plot using ggplot2
+ggplot(long_history, aes(x = epoch, y = value, color = metric)) +
+  geom_line() +
+  facet_wrap(~metric, scales = 'free_y') +
+  theme_minimal() +
+  labs(title = "Training History", x = "Epoch", y = "Metric Value")
+
+```
+
 
 ### Result for Modeling
 
 The training accuracy is relatively stable, indicating that the model is consistently learning or has reached a stable state of understanding the training data. However, the validation accuracy remains constant, suggesting that the model is not improving its performance on unseen data as training progresses. This could be a sign of overfitting, where the model performs well on the training data but fails to generalize well to new, unseen data.
 
-And the bottom Graph shows the training loss and validation loss over the same number of epochs. The training loss decreases and then stabilizes, which is typical as a model learns from the training data. The validation loss, however, is quite noisy, indicating variability in how well the model's predictions match the actual outputs of the validation data across epochs.
+And the right side Graph shows the training loss and validation loss over the same number of epochs. The training loss decreases and then stabilizes, which is typical as a model learns from the training data. The validation loss, however, is quite noisy, indicating variability in how well the model's predictions match the actual outputs of the validation data across epochs.
 
 ```{r}
 test_features <- as.matrix(test_data %>% select(-readmission_mark))
